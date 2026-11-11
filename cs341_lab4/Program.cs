@@ -2,105 +2,55 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
-
-class Edge
-{
-    public string U;
-    public string V;
-    public double W;
-    public int Index;
-
-    public Edge(string u, string v, double w, int index)
-    {
-        U = u;
-        V = v;
-        W = w;
-        Index = index;
-    }
-}
-
-class DSU
-{
-    private int[] parent;
-    private int[] rank;
-
-    public DSU(int n)
-    {
-        parent = new int[n];
-        rank = new int[n];
-
-        for (int i = 0; i < n; i++)
-            parent[i] = i;
-    }
-
-    public int Find(int x)
-    {
-        if (parent[x] != x)
-            parent[x] = Find(parent[x]);
-
-        return parent[x];
-    }
-
-    public bool Union(int a, int b)
-    {
-        int ra = Find(a);
-        int rb = Find(b);
-
-        if (ra == rb)
-            return false;
-
-        if (rank[ra] < rank[rb])
-        {
-            int tmp = ra;
-            ra = rb;
-            rb = tmp;
-        }
-
-        parent[rb] = ra;
-
-        if (rank[ra] == rank[rb])
-            rank[ra]++;
-
-        return true;
-    }
-}
+using System.Text;
 
 class Program
 {
-    static void Main(string[] args)
+    static int Main(string[] args)
     {
-        string inputPath = args.Length > 0 ? args[0] : "input.txt";
-        string outputPath = args.Length > 1 ? args[1] : "output.txt";
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine("Использование: program <input-file> <output-file>");
+            return 1;
+        }
 
-        var lines = File.ReadAllLines(inputPath)
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .ToArray();
+        string inputPath = args[0];
+        string outputPath = args[1];
 
-        if (lines.Length == 0)
-            return;
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine($"Файл не найден: {inputPath}");
+            return 1;
+        }
 
-        // Первая строка — имена вершин
-        string[] vertexNames = lines[0].Split(
+        var inputLines = new List<string>(File.ReadAllLines(inputPath));
+
+        if (inputLines.Count == 0)
+        {
+            File.WriteAllText(outputPath, string.Empty);
+            return 0;
+        }
+
+        var vertexNames = inputLines[0].Split(
             new[] { ' ', '\t' },
             StringSplitOptions.RemoveEmptyEntries
         );
 
-        var vertexId = new Dictionary<string, int>(StringComparer.Ordinal);
+        int n = vertexNames.Length;
 
-        foreach (string name in vertexNames)
+        var id = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < n; i++)
+            id[vertexNames[i]] = i;
+
+        var graph = new List<(int to, double weight)>[n];
+        for (int i = 0; i < n; i++)
+            graph[i] = new List<(int, double)>();
+
+        bool hasNegativeEdge = false;
+
+        for (int i = 1; i < inputLines.Count; i++)
         {
-            if (!vertexId.ContainsKey(name))
-                vertexId[name] = vertexId.Count;
-        }
-
-        var edges = new List<Edge>();
-        int edgeIndex = 0;
-
-        // Чтение рёбер
-        for (int i = 1; i < lines.Length; i++)
-        {
-            string[] parts = lines[i].Split(
+            var parts = inputLines[i].Split(
                 new[] { ' ', '\t' },
                 StringSplitOptions.RemoveEmptyEntries
             );
@@ -108,75 +58,75 @@ class Program
             if (parts.Length < 3)
                 continue;
 
-            string u = parts[0];
-            string v = parts[1];
-            double w = double.Parse(parts[2], CultureInfo.InvariantCulture);
+            string from = parts[0];
+            string to = parts[1];
+            double weight = double.Parse(parts[2], CultureInfo.InvariantCulture);
 
-            if (!vertexId.ContainsKey(u))
-                vertexId[u] = vertexId.Count;
+            if (weight < 0)
+                hasNegativeEdge = true;
 
-            if (!vertexId.ContainsKey(v))
-                vertexId[v] = vertexId.Count;
+            int u = id[from];
+            int v = id[to];
 
-            edges.Add(new Edge(u, v, w, edgeIndex++));
+            graph[u].Add((v, weight));
         }
 
-        // Сортировка рёбер по весу.
-        // При равенстве весов выбран дополнительный порядок,
-        // чтобы результат был детерминированным.
-        edges.Sort((e1, e2) =>
+        if (hasNegativeEdge)
         {
-            int cmp = e1.W.CompareTo(e2.W);
-            if (cmp != 0)
-                return cmp;
+            File.WriteAllText(outputPath, "Есть дуга отрицательного веса.\n");
+            return 0;
+        }
 
-            cmp = string.CompareOrdinal(e2.U, e1.U);
-            if (cmp != 0)
-                return cmp;
+        var dist = new double[n];
+        for (int i = 0; i < n; i++)
+            dist[i] = double.PositiveInfinity;
 
-            cmp = string.CompareOrdinal(e2.V, e1.V);
-            if (cmp != 0)
-                return cmp;
+        dist[0] = 0;
 
-            return e1.Index.CompareTo(e2.Index);
-        });
+        // Встроенная очередь с приоритетами (.NET 6+):
+        // элемент — номер вершины, приоритет — известное расстояние.
+        var pq = new PriorityQueue<int, double>();
+        pq.Enqueue(0, 0);
 
-        var dsu = new DSU(vertexId.Count);
-        var mstEdges = new List<Edge>();
-
-        double totalWeight = 0.0;
-
-        foreach (Edge edge in edges)
+        while (pq.Count > 0)
         {
-            int u = vertexId[edge.U];
-            int v = vertexId[edge.V];
+            if (!pq.TryDequeue(out int u, out double currentDist))
+                break;
 
-            if (dsu.Union(u, v))
+            // Устаревшая запись — расстояние уже улучшено раньше.
+            if (currentDist > dist[u])
+                continue;
+
+            foreach (var edge in graph[u])
             {
-                mstEdges.Add(edge);
-                totalWeight += edge.W;
+                int v = edge.to;
+                double newDist = currentDist + edge.weight;
+
+                if (newDist < dist[v])
+                {
+                    dist[v] = newDist;
+                    // decrease-key нет — кладём дубликат (lazy deletion).
+                    pq.Enqueue(v, newDist);
+                }
             }
         }
 
-        // Сортировка рёбер MST для вывода
-        mstEdges.Sort((e1, e2) =>
+        var sb = new StringBuilder();
+
+        for (int i = 1; i < n; i++)
         {
-            int cmp = string.CompareOrdinal(e1.U, e2.U);
-            if (cmp != 0)
-                return cmp;
-
-            return string.CompareOrdinal(e1.V, e2.V);
-        });
-
-        using var writer = new StreamWriter(outputPath);
-
-        writer.WriteLine(
-            totalWeight.ToString("0.0###############", CultureInfo.InvariantCulture)
-        );
-
-        foreach (Edge edge in mstEdges)
-        {
-            writer.WriteLine($"{edge.U} {edge.V}");
+            sb.Append(vertexNames[i]);
+            sb.Append(' ');
+            sb.Append(FormatDistance(dist[i]));
+            sb.Append('\n');
         }
+
+        File.WriteAllText(outputPath, sb.ToString());
+        return 0;
+    }
+
+    static string FormatDistance(double value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
     }
 }
