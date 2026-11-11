@@ -1,0 +1,10 @@
+a b c d e f g h
+a b 1
+a c 6
+b c 5
+c d 10
+e f 3
+e g 7
+f g 1
+f h 20
+g h 12
